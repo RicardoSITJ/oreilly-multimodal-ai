@@ -40,6 +40,7 @@ cd <agent_dir>
 python3 -m venv venv
 source venv/bin/activate
 python3 -m pip install -r requirements.txt
+python3 agent.py download-files
 python3 agent.py dev
 ```
 
@@ -49,6 +50,9 @@ Install dependencies and start your frontend application:
 
 ```
 cd <frontend_dir>
+
+npm install
+npm run dev
 
 pnpm install
 pnpm dev
