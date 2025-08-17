@@ -1,64 +1,66 @@
 import logging
-
 from dotenv import load_dotenv
-from livekit.agents import (
-    AutoSubscribe,
-    JobContext,
-    JobProcess,
-    WorkerOptions,
-    cli,
-    llm,
-)
-from livekit.agents.pipeline import VoicePipelineAgent
-from livekit.plugins import openai, deepgram, silero
 
+from livekit.agents import (
+    AgentSession,
+    Agent,
+    JobContext,
+    RoomInputOptions,
+    cli,
+    WorkerOptions,
+)
+from livekit.plugins import (
+    deepgram,
+    openai,
+    silero,
+    # noise_cancellation,  # comment/remove if not available in your LiveKit version
+)
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 load_dotenv(dotenv_path=".env.local")
 logger = logging.getLogger("voice-agent")
 
 
-def prewarm(proc: JobProcess):
-    proc.userdata["vad"] = silero.VAD.load()
+class Assistant(Agent):
+    def __init__(self) -> None:
+        super().__init__(
+            instructions=(
+                "Today is January 1st, 2025. You are a voice assistant named Andrew, "
+                "created by the wonderful Sinan Ozdemir. You speak with users via voice, "
+                "using short and concise responses and avoiding unpronounceable punctuation."
+            )
+        )
 
 
 async def entrypoint(ctx: JobContext):
-    initial_ctx = llm.ChatContext().append(
-        role="system",
-        text=(
-            "Today is January 1st, 2025. You are a voice assistant created by the wonderful Sinan Ozdemir and YOUR name is Andrew. Your interface with users will be voice. "
-            "You should use short and concise responses, and avoiding usage of unpronouncable punctuation. "
-        ),
-    )
+    """Start the voice assistant session."""
+    # Load VAD
+    vad = silero.VAD.load()
 
-    logger.info(f"connecting to room {ctx.room.name}")
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-
-    # Wait for the first participant to connect
-    participant = await ctx.wait_for_participant()
-    logger.info(f"starting voice assistant for participant {participant.identity}")
-
-    # This project is configured to use Deepgram STT, OpenAI LLM and TTS plugins
-    # Other great providers exist like Cartesia and ElevenLabs
-    # Learn more and pick the best one for your app:
-    # https://docs.livekit.io/agents/plugins
-    agent = VoicePipelineAgent(
-        vad=ctx.proc.userdata["vad"],
+    # Create the agent session
+    session = AgentSession(
         stt=deepgram.STT(),
-        llm=openai.LLM(model="gpt-4o-mini"),
+        llm=openai.LLM(model="gpt-4o-mini"),  # or google.LLM() if you prefer
         tts=openai.TTS(),
-        chat_ctx=initial_ctx,
+        vad=vad,
+        turn_detection=MultilingualModel(),
     )
 
-    agent.start(ctx.room, participant)
+    # Start the session in the room
+    await session.start(
+        room=ctx.room,
+        agent=Assistant(),
+        room_input_options=RoomInputOptions(),  # remove noise_cancellation if not available
+    )
 
-    # The agent should be polite and greet the user when it joins :)
-    await agent.say("Wazzup??", allow_interruptions=True)
+    # Instruct the agent to speak first
+    await session.generate_reply(instructions="say hello to the user")
 
 
 if __name__ == "__main__":
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
-            prewarm_fnc=prewarm,
-        ),
+            # prewarm_fnc=None,  # optional: can define a prewarm function if needed
+        )
     )
